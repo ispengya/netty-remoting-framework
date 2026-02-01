@@ -1,0 +1,136 @@
+package com.ispengya.remoting.netty;
+
+import com.ispengya.remoting.common.Pair;
+import com.ispengya.remoting.protocol.RemotingCommand;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.net.SocketAddress;
+import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+
+public abstract class NettyRemotingAbstract {
+    private static final Logger log = LoggerFactory.getLogger(NettyRemotingAbstract.class);
+
+    protected final HashMap<Integer, Pair<NettyRequestProcessor, ExecutorService>> processorTable = new HashMap<>(64);
+    protected final ConcurrentHashMap<Integer, ResponseFuture> responseTable = new ConcurrentHashMap<>(256);
+
+    public void processMessageReceived(ChannelHandlerContext ctx, RemotingCommand msg) {
+        if (msg != null) {
+            switch (msg.getType()) {
+                case REQUEST:
+                    processRequestCommand(ctx, msg);
+                    break;
+                case RESPONSE:
+                    processResponseCommand(ctx, msg);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    public void processRequestCommand(final ChannelHandlerContext ctx, final RemotingCommand cmd) {
+        final Pair<NettyRequestProcessor, ExecutorService> matched = this.processorTable.get(cmd.getCode());
+        final Pair<NettyRequestProcessor, ExecutorService> pair = null == matched ? this.processorTable.get(null) : matched;
+
+        if (pair != null) {
+            Runnable run = new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        final NettyRequestProcessor processor = pair.getObject1();
+                        RemotingCommand response = processor.processRequest(ctx, cmd);
+
+                        if (!cmd.isResponseType()) {
+                            if (response != null) {
+                                response.setOpaque(cmd.getOpaque());
+                                response.markResponseType();
+                                ctx.writeAndFlush(response);
+                            }
+                        }
+                    } catch (Throwable e) {
+                        log.error("process request exception", e);
+                        if (!cmd.isResponseType()) {
+                            RemotingCommand response = RemotingCommand.createResponseCommand(-1, e.getMessage(), cmd.getOpaque());
+                            ctx.writeAndFlush(response);
+                        }
+                    }
+                }
+            };
+
+            if (pair.getObject2() != null) {
+                try {
+                    pair.getObject2().submit(run);
+                } catch (RejectedExecutionException e) {
+                    if (!cmd.isResponseType()) {
+                        RemotingCommand response = RemotingCommand.createResponseCommand(-1, "system busy", cmd.getOpaque());
+                        ctx.writeAndFlush(response);
+                    }
+                }
+            } else {
+                run.run();
+            }
+        } else {
+            String error = " request type " + cmd.getCode() + " not supported";
+            RemotingCommand response = RemotingCommand.createResponseCommand(-1, error, cmd.getOpaque());
+            ctx.writeAndFlush(response);
+        }
+    }
+
+    public void processResponseCommand(ChannelHandlerContext ctx, RemotingCommand cmd) {
+        int opaque = cmd.getOpaque();
+        ResponseFuture responseFuture = responseTable.get(opaque);
+        if (responseFuture != null) {
+            responseFuture.putResponse(cmd);
+            responseTable.remove(opaque);
+        } else {
+            log.warn("receive response, but not matched any request, " + ctx.channel().remoteAddress());
+        }
+    }
+
+    public RemotingCommand invokeSyncImpl(final Channel channel, final RemotingCommand request, final long timeoutMillis)
+            throws InterruptedException, Exception {
+        final int opaque = request.getOpaque();
+
+        try {
+            final ResponseFuture responseFuture = new ResponseFuture(opaque, timeoutMillis);
+            this.responseTable.put(opaque, responseFuture);
+            final SocketAddress addr = channel.remoteAddress();
+
+            channel.writeAndFlush(request).addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(ChannelFuture f) throws Exception {
+                    if (f.isSuccess()) {
+                        responseFuture.setSendRequestOK(true);
+                        return;
+                    } else {
+                        responseFuture.setSendRequestOK(false);
+                    }
+                    responseTable.remove(opaque);
+                    responseFuture.setCause(f.cause());
+                    responseFuture.putResponse(null);
+                    log.warn("send a request command to channel <" + addr + "> failed.");
+                }
+            });
+
+            RemotingCommand responseCommand = responseFuture.waitResponse(timeoutMillis);
+            if (null == responseCommand) {
+                if (responseFuture.isSendRequestOK()) {
+                    throw new Exception("send request OK, but wait response timeout", responseFuture.getCause());
+                } else {
+                    throw new Exception("send request failed", responseFuture.getCause());
+                }
+            }
+            return responseCommand;
+        } finally {
+            this.responseTable.remove(opaque);
+        }
+    }
+}
