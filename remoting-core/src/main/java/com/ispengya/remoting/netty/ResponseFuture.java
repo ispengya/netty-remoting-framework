@@ -1,5 +1,6 @@
 package com.ispengya.remoting.netty;
 
+import com.ispengya.remoting.InvokeCallback;
 import com.ispengya.remoting.protocol.RemotingCommand;
 
 import java.util.concurrent.CountDownLatch;
@@ -10,14 +11,30 @@ public class ResponseFuture {
     private final long timeoutMillis;
     private final long beginTimestamp = System.currentTimeMillis();
     private final CountDownLatch countDownLatch = new CountDownLatch(1);
+    private final InvokeCallback invokeCallback;
 
     private volatile RemotingCommand responseCommand;
     private volatile boolean sendRequestOK = true;
     private volatile Throwable cause;
 
-    public ResponseFuture(int opaque, long timeoutMillis) {
+    public ResponseFuture(int opaque, long timeoutMillis, InvokeCallback invokeCallback) {
         this.opaque = opaque;
         this.timeoutMillis = timeoutMillis;
+        this.invokeCallback = invokeCallback;
+    }
+    
+    public ResponseFuture(int opaque, long timeoutMillis) {
+        this(opaque, timeoutMillis, null);
+    }
+
+    public void executeInvokeCallback() {
+        if (invokeCallback != null) {
+            if (this.cause != null) {
+                invokeCallback.onException(this.cause);
+            } else {
+                invokeCallback.onComplete(this.responseCommand);
+            }
+        }
     }
 
     public RemotingCommand waitResponse(final long timeoutMillis) throws InterruptedException {
@@ -56,5 +73,9 @@ public class ResponseFuture {
 
     public void setCause(Throwable cause) {
         this.cause = cause;
+    }
+
+    public InvokeCallback getInvokeCallback() {
+        return invokeCallback;
     }
 }

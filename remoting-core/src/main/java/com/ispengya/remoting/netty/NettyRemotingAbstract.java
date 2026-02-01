@@ -1,5 +1,6 @@
 package com.ispengya.remoting.netty;
 
+import com.ispengya.remoting.InvokeCallback;
 import com.ispengya.remoting.common.Pair;
 import com.ispengya.remoting.protocol.RemotingCommand;
 import io.netty.channel.Channel;
@@ -10,7 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.SocketAddress;
-import java.util.HashMap;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
@@ -89,6 +90,13 @@ public abstract class NettyRemotingAbstract {
         ResponseFuture responseFuture = responseTable.get(opaque);
         if (responseFuture != null) {
             responseFuture.putResponse(cmd);
+            if (responseFuture.getInvokeCallback() != null) {
+                try {
+                    responseFuture.executeInvokeCallback();
+                } catch (Throwable e) {
+                    log.error("execute callback exception", e);
+                }
+            }
             responseTable.remove(opaque);
         } else {
             log.warn("receive response, but not matched any request, " + ctx.channel().remoteAddress());
@@ -131,6 +139,58 @@ public abstract class NettyRemotingAbstract {
             return responseCommand;
         } finally {
             this.responseTable.remove(opaque);
+        }
+    }
+
+    public void invokeAsyncImpl(final Channel channel, final RemotingCommand request, final long timeoutMillis, final InvokeCallback invokeCallback)
+            throws InterruptedException, Exception {
+        final int opaque = request.getOpaque();
+        final ResponseFuture responseFuture = new ResponseFuture(opaque, timeoutMillis, invokeCallback);
+        this.responseTable.put(opaque, responseFuture);
+        final SocketAddress addr = channel.remoteAddress();
+
+        channel.writeAndFlush(request).addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture f) throws Exception {
+                if (f.isSuccess()) {
+                    responseFuture.setSendRequestOK(true);
+                    return;
+                } else {
+                    responseFuture.setSendRequestOK(false);
+                }
+                responseTable.remove(opaque);
+                responseFuture.setCause(f.cause());
+                responseFuture.putResponse(null);
+                try {
+                    responseFuture.executeInvokeCallback();
+                } catch (Throwable e) {
+                    log.warn("execute callback in writeAndFlush addListener, and callback throw", e);
+                }
+            }
+        });
+    }
+
+    public void scanResponseTable() {
+        final List<ResponseFuture> rfList = new LinkedList<ResponseFuture>();
+        Iterator<Map.Entry<Integer, ResponseFuture>> it = this.responseTable.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<Integer, ResponseFuture> next = it.next();
+            ResponseFuture rep = next.getValue();
+
+            if ((rep.getBeginTimestamp() + rep.getTimeoutMillis() + 1000) <= System.currentTimeMillis()) {
+                it.remove();
+                rfList.add(rep);
+                log.warn("remove timeout request, " + rep);
+            }
+        }
+
+        for (ResponseFuture rf : rfList) {
+            try {
+                rf.setCause(new Exception("timeout"));
+                rf.executeInvokeCallback();
+            } catch (Throwable e) {
+                log.warn("scanResponseTable, operationComplete Exception", e);
+            }
         }
     }
 }

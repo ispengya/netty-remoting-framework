@@ -1,5 +1,6 @@
 package com.ispengya.remoting.netty;
 
+import com.ispengya.remoting.InvokeCallback;
 import com.ispengya.remoting.RemotingClient;
 import com.ispengya.remoting.protocol.RemotingCommand;
 import io.netty.bootstrap.Bootstrap;
@@ -11,6 +12,8 @@ import io.netty.handler.timeout.IdleStateHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
@@ -21,6 +24,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
     private final Bootstrap bootstrap = new Bootstrap();
     private final EventLoopGroup eventLoopGroupWorker;
     private final ConcurrentHashMap<String, Channel> channelTable = new ConcurrentHashMap<>();
+    private final Timer timer = new Timer("ClientHouseKeepingService", true);
 
     public NettyRemotingClient() {
         this.eventLoopGroupWorker = new NioEventLoopGroup(4, new ThreadFactory() {
@@ -49,10 +53,22 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
                                 new NettyClientHandler());
                     }
                 });
+
+        this.timer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                try {
+                    NettyRemotingClient.this.scanResponseTable();
+                } catch (Throwable e) {
+                    log.error("scanResponseTable exception", e);
+                }
+            }
+        }, 1000 * 3, 1000);
     }
 
     @Override
     public void shutdown() {
+        this.timer.cancel();
         this.eventLoopGroupWorker.shutdownGracefully();
         for (Channel channel : this.channelTable.values()) {
             channel.close();
@@ -68,6 +84,22 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
                 return this.invokeSyncImpl(channel, request, timeoutMillis);
             } catch (Exception e) {
                 log.error("invokeSync exception", e);
+                throw e;
+            }
+        } else {
+            this.closeChannel(addr, channel);
+            throw new Exception("connect to <" + addr + "> failed");
+        }
+    }
+
+    @Override
+    public void invokeAsync(String addr, RemotingCommand request, long timeoutMillis, InvokeCallback invokeCallback) throws InterruptedException, Exception {
+        final Channel channel = this.getAndCreateChannel(addr);
+        if (channel != null && channel.isActive()) {
+            try {
+                this.invokeAsyncImpl(channel, request, timeoutMillis, invokeCallback);
+            } catch (Exception e) {
+                log.error("invokeAsync exception", e);
                 throw e;
             }
         } else {
