@@ -26,16 +26,20 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
     private int listenPort;
 
     public NettyRemotingServer(int port) {
+        this(port, 1, 4);
+    }
+
+    public NettyRemotingServer(int port, int bossThreads, int selectorThreads) {
         this.serverBootstrap = new ServerBootstrap();
-        this.eventLoopGroupBoss = new NioEventLoopGroup(1, new ThreadFactory() {
+        this.eventLoopGroupBoss = new NioEventLoopGroup(bossThreads, new ThreadFactory() {
             private AtomicInteger threadIndex = new AtomicInteger(0);
             @Override
             public Thread newThread(Runnable r) {
                 return new Thread(r, String.format("NettyBoss_%d", this.threadIndex.incrementAndGet()));
             }
         });
-        
-        this.eventLoopGroupSelector = new NioEventLoopGroup(4, new ThreadFactory() {
+
+        this.eventLoopGroupSelector = new NioEventLoopGroup(selectorThreads, new ThreadFactory() {
             private AtomicInteger threadIndex = new AtomicInteger(0);
             @Override
             public Thread newThread(Runnable r) {
