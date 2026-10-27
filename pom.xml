@@ -4,23 +4,52 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.ispengya.remoting</groupId>
+    <groupId>io.github.ispengya</groupId>
     <artifactId>netty-remoting-framework</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <packaging>pom</packaging>
+
+    <name>Netty Remoting Framework</name>
+    <description>基于 Netty 的通用远程通信框架，参考 RocketMQ Remoting 设计。</description>
+    <url>https://github.com/ispengya/netty-remoting-framework</url>
+
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>ispengya</id>
+            <name>ispengya</name>
+            <email>ispengya@gmail.com</email>
+            <url>https://github.com/ispengya</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/ispengya/netty-remoting-framework.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/ispengya/netty-remoting-framework.git</developerConnection>
+        <url>https://github.com/ispengya/netty-remoting-framework</url>
+    </scm>
 
     <modules>
         <module>remoting-core</module>
     </modules>
 
     <properties>
-        <maven.compiler.source>8</maven.compiler.source>
-        <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>8</maven.compiler.release>
         <netty.version>4.1.100.Final</netty.version>
         <slf4j.version>1.7.36</slf4j.version>
         <logback.version>1.2.11</logback.version>
         <fastjson2.version>2.0.40</fastjson2.version>
+        <junit.version>4.13.2</junit.version>
+        <gpg.keyname>E0D0D22DBB41E745173E30AC356D8913E73CC2F8</gpg.keyname>
+        <gpg.passphrase.file>${user.home}/.m2/central-gpg-passphrase</gpg.passphrase.file>
     </properties>
 
     <dependencyManagement>
@@ -50,7 +79,103 @@
                 <artifactId>fastjson2</artifactId>
                 <version>${fastjson2.version}</version>
             </dependency>
+
+            <!-- Test -->
+            <dependency>
+                <groupId>junit</groupId>
+                <artifactId>junit</artifactId>
+                <version>${junit.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <release>8</release>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.3.1</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>3.11.2</version>
+                        <configuration>
+                            <release>8</release>
+                            <doclint>none</doclint>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.7</version>
+                        <configuration>
+                            <keyname>${gpg.keyname}</keyname>
+                            <gpgArguments>
+                                <arg>--pinentry-mode</arg>
+                                <arg>loopback</arg>
+                                <arg>--passphrase-file</arg>
+                                <arg>${gpg.passphrase.file}</arg>
+                            </gpgArguments>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.9.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>false</autoPublish>
+                            <waitUntil>validated</waitUntil>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
