@@ -31,10 +31,25 @@ public abstract class NettyRemotingAbstract {
                 case RESPONSE:
                     processResponseCommand(ctx, msg);
                     break;
+                case PUSH:
+                    processPushCommand(ctx, msg);
+                    break;
                 default:
                     break;
             }
         }
+    }
+
+    /**
+     * 处理服务端主动推送消息。
+     *
+     * <p>默认实现只记录日志，客户端通过覆写该方法分发到注册的监听器。</p>
+     *
+     * @param ctx 通道上下文
+     * @param cmd 推送消息
+     */
+    protected void processPushCommand(ChannelHandlerContext ctx, RemotingCommand cmd) {
+        log.warn("receive push message but no listener registered, code={}", cmd.getCode());
     }
 
     public void processRequestCommand(final ChannelHandlerContext ctx, final RemotingCommand cmd) {

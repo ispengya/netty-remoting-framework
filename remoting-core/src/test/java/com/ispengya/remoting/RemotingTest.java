@@ -4,6 +4,7 @@ import com.ispengya.remoting.netty.NettyRemotingClient;
 import com.ispengya.remoting.netty.NettyRemotingServer;
 import com.ispengya.remoting.netty.NettyRequestProcessor;
 import com.ispengya.remoting.protocol.RemotingCommand;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import org.junit.After;
 import org.junit.Before;
@@ -14,6 +15,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
@@ -32,14 +34,17 @@ public class RemotingTest {
     private NettyRemotingServer server;
     private NettyRemotingClient client;
     private ExecutorService processorExecutor;
+    private AtomicReference<Channel> serverSideChannel;
 
     @Before
     public void setUp() {
         processorExecutor = Executors.newCachedThreadPool();
+        serverSideChannel = new AtomicReference<Channel>();
         server = new NettyRemotingServer(0);
         server.registerProcessor(REQUEST_CODE, new NettyRequestProcessor() {
             @Override
             public RemotingCommand processRequest(ChannelHandlerContext ctx, RemotingCommand request) {
+                serverSideChannel.set(ctx.channel());
                 RemotingCommand response = RemotingCommand.createResponseCommand(200, "Success");
                 String body = request.getBody() == null
                         ? ""
@@ -117,6 +122,56 @@ public class RemotingTest {
 
         assertEquals(-1, response.getCode());
         assertTrue(response.getRemark().contains("not supported"));
+    }
+
+    @Test
+    public void serverPushReachesRegisteredListener() throws Exception {
+        final CountDownLatch latch = new CountDownLatch(1);
+        final AtomicReference<RemotingCommand> received = new AtomicReference<RemotingCommand>();
+        client.registerPushListener(300, new PushListener() {
+            @Override
+            public void onMessage(RemotingCommand message) {
+                received.set(message);
+                latch.countDown();
+            }
+        });
+
+        client.invokeSync(address(), RemotingCommand.createRequestCommand(REQUEST_CODE, null), TIMEOUT_MILLIS);
+        Channel channel = serverSideChannel.get();
+        assertNotNull(channel);
+
+        RemotingCommand push = RemotingCommand.createPushCommand(300);
+        push.setBody("push-body".getBytes(StandardCharsets.UTF_8));
+        server.push(channel, push);
+
+        assertTrue("推送消息超时", latch.await(5, TimeUnit.SECONDS));
+        assertNotNull(received.get());
+        assertEquals(300, received.get().getCode());
+        assertEquals("push-body", new String(received.get().getBody(), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    public void pushListenerExceptionDoesNotBreakFollowingPushes() throws Exception {
+        final CountDownLatch latch = new CountDownLatch(1);
+        final AtomicInteger count = new AtomicInteger(0);
+        client.registerPushListener(301, new PushListener() {
+            @Override
+            public void onMessage(RemotingCommand message) {
+                if (count.incrementAndGet() == 1) {
+                    throw new IllegalStateException("listener failure");
+                }
+                latch.countDown();
+            }
+        });
+
+        client.invokeSync(address(), RemotingCommand.createRequestCommand(REQUEST_CODE, null), TIMEOUT_MILLIS);
+        Channel channel = serverSideChannel.get();
+        assertNotNull(channel);
+        server.push(channel, RemotingCommand.createPushCommand(301));
+        server.push(channel, RemotingCommand.createPushCommand(301));
+
+        assertTrue("第二条推送未被处理", latch.await(5, TimeUnit.SECONDS));
+        assertEquals(2, count.get());
     }
 
     private String address() {

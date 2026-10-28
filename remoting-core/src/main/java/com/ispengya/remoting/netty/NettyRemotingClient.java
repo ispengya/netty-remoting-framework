@@ -1,6 +1,7 @@
 package com.ispengya.remoting.netty;
 
 import com.ispengya.remoting.InvokeCallback;
+import com.ispengya.remoting.PushListener;
 import com.ispengya.remoting.RemotingClient;
 import com.ispengya.remoting.protocol.RemotingCommand;
 import io.netty.bootstrap.Bootstrap;
@@ -24,6 +25,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
     private final Bootstrap bootstrap = new Bootstrap();
     private final EventLoopGroup eventLoopGroupWorker;
     private final ConcurrentHashMap<String, Channel> channelTable = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, PushListener> pushListenerTable = new ConcurrentHashMap<>();
     private final Timer timer = new Timer("ClientHouseKeepingService", true);
 
     public NettyRemotingClient() {
@@ -74,6 +76,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
             channel.close();
         }
         this.channelTable.clear();
+        this.pushListenerTable.clear();
     }
 
     @Override
@@ -105,6 +108,33 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
         } else {
             this.closeChannel(addr, channel);
             throw new Exception("connect to <" + addr + "> failed");
+        }
+    }
+
+    @Override
+    public void registerPushListener(int code, PushListener listener) {
+        if (listener == null) {
+            throw new IllegalArgumentException("Push listener must not be null");
+        }
+        this.pushListenerTable.put(code, listener);
+    }
+
+    @Override
+    public void unregisterPushListener(int code) {
+        this.pushListenerTable.remove(code);
+    }
+
+    @Override
+    protected void processPushCommand(ChannelHandlerContext ctx, RemotingCommand cmd) {
+        PushListener listener = this.pushListenerTable.get(cmd.getCode());
+        if (listener == null) {
+            super.processPushCommand(ctx, cmd);
+            return;
+        }
+        try {
+            listener.onMessage(cmd);
+        } catch (Throwable e) {
+            log.warn("process push message failed, code=" + cmd.getCode(), e);
         }
     }
 

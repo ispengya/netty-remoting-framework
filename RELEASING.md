@@ -75,14 +75,14 @@ mvn clean deploy -Prelease
 <dependency>
   <groupId>io.github.ispengya</groupId>
   <artifactId>remoting-core</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
 </dependency>
 ```
 
 `repo1.maven.org` 同步可能需要几分钟,可以用下面的命令验证:
 
 ```bash
-mvn dependency:get -Dartifact=io.github.ispengya:remoting-core:0.1.0
+mvn dependency:get -Dartifact=io.github.ispengya:remoting-core:0.2.0
 ```
 
 ## 6. 后续版本

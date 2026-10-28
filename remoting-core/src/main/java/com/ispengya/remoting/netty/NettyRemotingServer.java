@@ -94,6 +94,20 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
     }
 
     @Override
+    public ChannelFuture push(Channel channel, RemotingCommand message) {
+        if (channel == null) {
+            throw new IllegalArgumentException("Channel must not be null");
+        }
+        if (message == null) {
+            throw new IllegalArgumentException("Message must not be null");
+        }
+        if (!channel.isActive()) {
+            return channel.newFailedFuture(new IllegalStateException("Channel is not active"));
+        }
+        return channel.writeAndFlush(message);
+    }
+
+    @Override
     public int localListenPort() {
         return this.listenPort;
     }
