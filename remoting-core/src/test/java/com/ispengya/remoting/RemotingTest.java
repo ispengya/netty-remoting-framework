@@ -10,6 +10,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -172,6 +173,65 @@ public class RemotingTest {
 
         assertTrue("第二条推送未被处理", latch.await(5, TimeUnit.SECONDS));
         assertEquals(2, count.get());
+    }
+
+    @Test
+    public void loopbackBoundServerRejectsLanAccess() throws Exception {
+        NettyRemotingServer loopbackServer = new NettyRemotingServer("127.0.0.1", 0);
+        loopbackServer.registerProcessor(REQUEST_CODE, new NettyRequestProcessor() {
+            @Override
+            public RemotingCommand processRequest(ChannelHandlerContext ctx, RemotingCommand request) {
+                return RemotingCommand.createResponseCommand(200, "OK");
+            }
+        }, processorExecutor);
+        try {
+            loopbackServer.start();
+            int port = loopbackServer.localListenPort();
+
+            // 回环地址可以正常连通
+            try (java.net.Socket socket = new java.net.Socket("127.0.0.1", port)) {
+                assertTrue(socket.isConnected());
+            }
+
+            // 本机非回环地址不应连通；机器没有可用网卡时跳过该半边断言
+            String lanIp = detectLanIpv4();
+            if (lanIp != null) {
+                try (java.net.Socket socket = new java.net.Socket()) {
+                    socket.connect(new InetSocketAddress(lanIp, port), 500);
+                    org.junit.Assert.fail("回环绑定的端口不应从局域网地址连通: " + lanIp);
+                } catch (java.io.IOException expected) {
+                    // 预期：连接被拒绝或超时（Windows 防火墙对本机局域网地址常为丢弃）
+                }
+            }
+        } finally {
+            loopbackServer.shutdown();
+        }
+    }
+
+    private static String detectLanIpv4() {
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> interfaces =
+                    java.net.NetworkInterface.getNetworkInterfaces();
+            while (interfaces.hasMoreElements()) {
+                java.net.NetworkInterface networkInterface = interfaces.nextElement();
+                if (!networkInterface.isUp() || networkInterface.isLoopback()
+                        || networkInterface.isVirtual()) {
+                    continue;
+                }
+                java.util.Enumeration<java.net.InetAddress> addresses =
+                        networkInterface.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    java.net.InetAddress address = addresses.nextElement();
+                    if (address instanceof java.net.Inet4Address && !address.isLoopbackAddress()
+                            && !address.isLinkLocalAddress() && address.isSiteLocalAddress()) {
+                        return address.getHostAddress();
+                    }
+                }
+            }
+        } catch (java.net.SocketException e) {
+            return null;
+        }
+        return null;
     }
 
     private String address() {

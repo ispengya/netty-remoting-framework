@@ -22,14 +22,28 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
     private final ServerBootstrap serverBootstrap;
     private final EventLoopGroup eventLoopGroupBoss;
     private final EventLoopGroup eventLoopGroupSelector;
+    /**
+     * 绑定地址；null 或空字符串表示绑定所有网卡（通配地址）。
+     */
+    private final String host;
     private final int port;
     private int listenPort;
 
     public NettyRemotingServer(int port) {
-        this(port, 1, 4);
+        this(null, port, 1, 4);
+    }
+
+    public NettyRemotingServer(String host, int port) {
+        this(host, port, 1, 4);
     }
 
     public NettyRemotingServer(int port, int bossThreads, int selectorThreads) {
+        this(null, port, bossThreads, selectorThreads);
+    }
+
+    public NettyRemotingServer(String host, int port, int bossThreads, int selectorThreads) {
+        this.host = host;
+        this.port = port;
         this.serverBootstrap = new ServerBootstrap();
         this.eventLoopGroupBoss = new NioEventLoopGroup(bossThreads, new ThreadFactory() {
             private AtomicInteger threadIndex = new AtomicInteger(0);
@@ -46,7 +60,6 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
                 return new Thread(r, String.format("NettySelector_%d", this.threadIndex.incrementAndGet()));
             }
         });
-        this.port = port;
     }
 
     @Override
@@ -58,7 +71,7 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
                 .childOption(ChannelOption.TCP_NODELAY, true)
                 .childOption(ChannelOption.SO_SNDBUF, 65535)
                 .childOption(ChannelOption.SO_RCVBUF, 65535)
-                .localAddress(new InetSocketAddress(this.port))
+                .localAddress(bindAddress())
                 .childHandler(new ChannelInitializer<SocketChannel>() {
                     @Override
                     public void initChannel(SocketChannel ch) throws Exception {
@@ -75,10 +88,21 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
             ChannelFuture sync = this.serverBootstrap.bind().sync();
             InetSocketAddress addr = (InetSocketAddress) sync.channel().localAddress();
             this.listenPort = addr.getPort();
-            log.info("RemotingServer started, listening on {}", this.listenPort);
+            log.info("RemotingServer started, listening on {}:{}", addr.getAddress().getHostAddress(),
+                    this.listenPort);
         } catch (InterruptedException e) {
             throw new RuntimeException("this.serverBootstrap.bind().sync() InterruptedException", e);
         }
+    }
+
+    /**
+     * 解析实际绑定地址：未指定 host 时绑定通配地址（所有网卡）。
+     */
+    private InetSocketAddress bindAddress() {
+        if (this.host == null || this.host.trim().isEmpty()) {
+            return new InetSocketAddress(this.port);
+        }
+        return new InetSocketAddress(this.host.trim(), this.port);
     }
 
     @Override
