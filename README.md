@@ -6,13 +6,13 @@
 
 运行时要求 Java 8+。
 
-Maven Central:[io.github.ispengya:remoting-core:0.2.0](https://repo1.maven.org/maven2/io/github/ispengya/remoting-core/0.2.0/)
+Maven Central:[io.github.ispengya:remoting-core:0.2.2](https://repo1.maven.org/maven2/io/github/ispengya/remoting-core/0.2.2/)
 
 ```xml
 <dependency>
   <groupId>io.github.ispengya</groupId>
   <artifactId>remoting-core</artifactId>
-  <version>0.2.0</version>
+  <version>0.2.2</version>
 </dependency>
 ```
 
