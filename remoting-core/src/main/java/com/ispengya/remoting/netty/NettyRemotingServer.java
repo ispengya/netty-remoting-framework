@@ -111,6 +111,23 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
         this.eventLoopGroupSelector.shutdownGracefully();
     }
 
+    /**
+     * 等待 shutdown 发起的优雅停机完成。
+     *
+     * @param timeoutMillis 总等待超时（毫秒）
+     * @return 两个 event loop 是否都在超时前退出
+     * @throws InterruptedException 等待被中断
+     */
+    public boolean awaitTermination(long timeoutMillis) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        boolean boss = this.eventLoopGroupBoss.awaitTermination(
+                timeoutMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
+        long remaining = Math.max(1L, deadline - System.currentTimeMillis());
+        boolean selector = this.eventLoopGroupSelector.awaitTermination(
+                remaining, java.util.concurrent.TimeUnit.MILLISECONDS);
+        return boss && selector;
+    }
+
     @Override
     public void registerProcessor(int requestCode, NettyRequestProcessor processor, ExecutorService executor) {
         ExecutorService executorThis = executor;
